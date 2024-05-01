@@ -1,17 +1,19 @@
 import pygame
 from pygame.locals import *
-from random import randint
+import random
 import math
 
 import Survivor
 from Entity import Entity
 
 class Killer(Entity):
-    def __init__(self, name, position, game):
+    def __init__(self, name, position, game, generator_positions):
         super().__init__(position)
         self.name = name
         self.game = game
-        self.speed = 3
+        self.original_speed = 3
+        self.reduced_speed = self.original_speed / 2
+        self.speed = self.original_speed
         self.velocity = [0, 0]
         self.chase_speed_increase = 0.3
         self.direction = 0
@@ -20,18 +22,36 @@ class Killer(Entity):
         self.interaction_range = 5
         self.chase_range = 30
         self.explored = set()
-        self.angle_of_vision = 90
+        self.angle_of_vision = 120
         self.max_vision_distance = 200
+        self.target_survivor = None
+        self.generator_positions = generator_positions
+        self.generator_queue = self.initialize_queue(self.generator_positions)
+        self.attack_timer = 0
 
-    def patrol_around_generator(self, generator_position):
-        dx = randint(-1, 1)
-        dy = randint(-1, 1)
-        self.update_position(dx, dy)
+    def initialize_queue(self, generator_positions):
+        sorted_generators = sorted(generator_positions, key=lambda gen: self.find_distance(gen))
+        return sorted_generators
+
+    def patrol_around_generator(self):
+        patrol_distance = 5  # Adjust this value to control the patrol radius
+
+        # Find the closest generator from the queue head
+        closest_generator = self.generator_queue[0]
+        distance = self.find_distance(closest_generator)  # Replace with your distance calculation function
+        if distance < patrol_distance:
+            # Reached patrol distance, update queue
+            current_generator_position = self.generator_queue[0]
+            self.generator_queue.pop(0)  # Remove the visited generator
+            self.generator_queue.append(current_generator_position)
+        else:
+            self.move_towards(closest_generator)
+
 
     def wander(self):
         # print("CURRENT DIRECTION: ", self.direction)
         # Randomly adjust the killer's direction
-        new_direction = self.direction + randint(-30, 30)
+        new_direction = self.direction + random.randint(-30, 30)
         self.direction = new_direction
 
         # Calculate velocity components
@@ -47,15 +67,18 @@ class Killer(Entity):
         dy = survivor_position[1] - self.position[1]
         distance = math.sqrt(dx ** 2 + dy ** 2)
 
+        if self.is_chasing and self.chase_timer >= 15:
+            self.increase_chase_speed()
+
         if distance <= self.max_vision_distance:
-            if distance != 0:
-                dx /= distance
-                dy /= distance
-            self.update_position(dx, dy)
+            self.move_towards(survivor_position)
+
+        if distance <= self.interaction_range:
+            self.attack(self.target_survivor)
 
     def move_towards(self, target):
-        dx = target.position[0] - self.position[0]
-        dy = target.position[1] - self.position[1]
+        dx = target[0] - self.position[0]
+        dy = target[1] - self.position[1]
         angle = math.degrees(math.atan2(dy, dx))
 
         self.direction = angle
@@ -70,19 +93,55 @@ class Killer(Entity):
         self.position[0] = max(0, min(self.position[0], self.game.width))
         self.position[1] = max(0, min(self.position[1], self.game.height - 100))
 
-        seen_survivors = []
-
+        self.target_survivor = None
         for survivor in self.game.survivors:
             if self.check_vision_cone(survivor.position):
                 print(f"{self.name} sees {survivor.name}")
-                seen_survivors.append(survivor)
+                # seen_survivors.append(survivor)
+                self.target_survivor = survivor
+                break
 
-        if seen_survivors:
-            nearest_survivor = min(seen_survivors, key=lambda s: self.find_distance(s.position))
-            self.move_towards(nearest_survivor)
-
+        if self.target_survivor is not None:
+            self.is_chasing = True
+            self.chase_timer += 1
+            self.chase_survivor(self.target_survivor.position)
         else:
-            self.wander()
+            self.is_chasing = False
+            self.chase_timer = 0
+            # Choose between patrolling or wandering (existing logic)
+            if not self.is_chasing:
+                if random.random() > 0.75:
+                    self.wander()
+                else:
+                    self.patrol_around_generator()
+
+        # Update reward based on actions (replace with your reward logic)
+        if self.is_chasing:
+            self.reward += 0.1  # Reward for chasing survivors (adjust value)
+        elif self.is_moving():
+            self.reward += 0.05  # Small reward for exploration
+
+        # Apply slow down after hitting survivor
+        if self.attack_timer > 0:
+            self.speed = self.reduced_speed  # Reduce speed during attack timer
+            self.attack_timer -= 1
+        else:
+            self.speed = self.original_speed  # Reset speed after slow down duration
+
+        return self.get_state()
+
+    def get_state(self):
+        return {
+            "name": self.name,
+            "position": self.position,
+            "is_chasing": self.is_chasing,
+            "chase_timer": self.chase_timer,
+            "target_survivor": self.target_survivor and self.target_survivor.name,
+            # Add information about nearby survivors and generators based on your observation design
+        }
+
+    def is_moving(self):
+        return self.velocity[0] != 0 or self.velocity[1] != 0
 
     def find_distance(self, target_position):
         dx = target_position[0] - self.position[0]
@@ -98,17 +157,14 @@ class Killer(Entity):
         self.position[1] = max(0, min(self.position[1], screen_height))
 
     def increase_chase_speed(self):
+        print("SPEED INCREASE")
         self.speed += self.chase_speed_increase
 
     def reset_chase_timer(self):
         self.chase_timer = 0
 
-    def update_chase_timer(self, dt):
-        self.chase_timer += dt
-
     def explore(self, area):
         self.explored.add(area)
-
 
     def get_angle_in_degrees(self):
         return math.degrees(math.atan2(self.velocity[1], self.velocity[0]))
@@ -122,7 +178,14 @@ class Killer(Entity):
         return relative_angle
 
     def attack(self, target):
-        target.take_hit()
+        if self.find_distance(target.position) <= self.interaction_range:
+            target.take_hit()
+            print(f"{self.name} hits {target.name}!")
+            self.attack_timer = 3  # Reset attack timer for slow down
+            self.is_chasing = False
+            self.reset_chase_timer()
+            self.speed = self.reduced_speed
+
 
     def hook(self, target, hook):
         if not hook.is_occupied:

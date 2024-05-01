@@ -7,6 +7,7 @@ from Survivor import Survivor
 from Generator import Generator
 from Killer import Killer
 from Hook import Hook
+from Entity import Entity
 
 class Game:
     def __init__(self, width, height):
@@ -14,11 +15,17 @@ class Game:
         self.height = height
         self.entities = []
         self.survivors = []
+        self.generator_list = []
+        self.generator_pos = []
+        self.legend_height = 100
+        self.killer = None
 
         pygame.init()
         self.screen = pygame.display.set_mode((width, height))
         pygame.display.set_caption("Dead By RL")
         self.font = pygame.font.Font(None, 24)  # Choose a font and font size
+        self.horizontal_spacing = 20
+        self.vertical_spacing = 40
 
     def add_entity(self, entity):
         self.entities.append(entity)
@@ -35,21 +42,20 @@ class Game:
 
         # Draw legend
         legend_width = self.width
-        legend_height = 100
         legend_x = 0
-        legend_y = self.height - legend_height
+        legend_y = self.height - self.legend_height
         pygame.draw.rect(self.screen, (50, 50, 50),
-                         (legend_x, legend_y, legend_width, legend_height))  # Legend background
+                         (legend_x, legend_y, legend_width, self.legend_height))  # Legend background
 
         self.draw_text("Legend:", legend_x + 10, legend_y + 10, (255, 255, 255))
-        self.draw_text("Generator Complete: White Square", legend_x + 10, legend_y + 40, (255, 255, 255))
-        self.draw_text("Generator Incomplete: Grey Square", legend_x + 10, legend_y + 70, (128, 128, 128))
+        self.draw_text("Generator Complete: White Square", legend_x + self.horizontal_spacing, legend_y + self.vertical_spacing, (255, 255, 255))
+        self.draw_text("Generator Incomplete: Grey Square", legend_x + self.horizontal_spacing, legend_y + 2 * self.vertical_spacing, (128, 128, 128))
 
-        self.draw_text("Survivor: Green Circle", legend_x + self.width / 3 + 10, legend_y + 40, (0, 255, 0))
-        self.draw_text("Killer: Red Circle", legend_x + self.width / 3 + 10, legend_y + 70, (255, 0, 0))
+        self.draw_text("Survivor: Green Circle", legend_x + self.width / 3 + self.horizontal_spacing, legend_y + self.vertical_spacing, (0, 255, 0))
+        self.draw_text("Killer: Red Circle", legend_x + self.width / 3 + self.horizontal_spacing, legend_y + 2 * self.vertical_spacing, (255, 0, 0))
 
-        self.draw_text("Unoccupied Hooks: Yellow Circle", legend_x + 2 * self.width / 3 + 10, legend_y + 40, (255, 255, 0))
-        self.draw_text("Occupied Hooks: Orange Circle", legend_x + 2 * self.width / 3 + 10, legend_y + 70, (255, 165, 0))
+        self.draw_text("Unoccupied Hooks: Yellow Circle", legend_x + 2 * self.width / 3 + self.horizontal_spacing, legend_y + self.vertical_spacing, (255, 255, 0))
+        self.draw_text("Occupied Hooks: Orange Circle", legend_x + 2 * self.width / 3 + self.horizontal_spacing, legend_y + 2 * self.vertical_spacing, (255, 165, 0))
 
         pygame.display.flip()
 
@@ -61,8 +67,19 @@ class Game:
         # Update game logic
         for entity in self.entities:
             entity.update()
+
+        # Check for completed generators and notify all survivors
+        completed_generators = 0
+        for generator in self.entities:
+            if isinstance(generator, Generator) and generator.is_completed:
+                completed_generators += 1
+        if completed_generators > 0:
+            for survivor in self.survivors:
+                survivor.generator_completed()  # Update survivor logic
+
+
     def generate_random_position(self):
-        return [random.randint(0, self.width), random.randint(0, self.height)]
+        return [random.randint(0, self.width), random.randint(0, self.height - self.legend_height)]
 
     def is_collision(self, pos):
         for entity in self.entities:
@@ -88,10 +105,20 @@ class Game:
             survivor = Survivor(f"Survivor {i + 1}", pos, self)
             self.add_entity(survivor)
 
+        for i in range(6):
+            pos = self.generate_random_position()
+            while self.is_collision(pos):
+                pos = self.generate_random_position()
+
+            generator = Generator(pos)
+            self.add_entity(generator)
+            self.generator_list.append(generator)
+            self.generator_pos.append(pos)
+
         pos = self.generate_random_position()
         while self.is_collision(pos):
             pos = self.generate_random_position()
-        self.killer = Killer("Jason", pos, self)  # Pass the Game instance to the Killer constructor
+        self.killer = Killer("Jason", pos, self, self.generator_pos)  # Pass the Game instance to the Killer constructor
         self.add_entity(self.killer)
 
     def run(self):
@@ -111,5 +138,5 @@ class Game:
         pygame.quit()
 
 if __name__ == "__main__":
-    game = Game(900, 600)
+    game = Game(1300, 1000)
     game.run()
