@@ -47,7 +47,7 @@ class Generator(Entity):
             color = completed_color
         else:
             # Interpolate color for in-between stages
-            progress_percent = self.progress / self.repair_speed
+            progress_percent = self.progress / self.repair_timer
             color = self.interpolate_color(unworked_color, completed_color, progress_percent)
 
         pygame.draw.rect(screen, color, (int(self.position[0]), int(self.position[1]), 20, 20))

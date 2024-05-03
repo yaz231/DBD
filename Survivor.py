@@ -16,7 +16,7 @@ class Survivor(Entity):
         self.dead = False
         self.is_downed = False
         self.hooked_count = 0
-        self.speed = 4
+        self.speed = 3.5
         self.bleedout_times = [60, 30]
         self.bleedout_time = self.bleedout_times[self.hooked_count]
         self.velocity = [0, 0]
@@ -40,10 +40,25 @@ class Survivor(Entity):
             # Turn left or right randomly
             self.direction += random.choice([-1, 1]) * math.radians(15)  # Adjust the turning angle as needed
 
-    def repair_generator(self, generator_position):
-        if self.find_distance(generator_position) <= self.interaction_range:
+    def repair_generator(self, generator):
+        if self.find_distance(generator.position) <= self.interaction_range:
             print(f"{self.name} is repairing the generator.")
-            self.game.generators[generator_position].repair(self)  # Call the generator's repair method
+            # Stop the survivor's movement while repairing
+            self.stop()
+            # Start repairing the generator
+            if self.interaction_start_time is None:
+                self.interaction_start_time = time.time()
+                self.interaction_target = generator
+            else:
+                # Calculate repair progress based on time spent repairing
+                current_time = time.time()
+                repair_time_elapsed = current_time - self.interaction_start_time
+                repair_progress = repair_time_elapsed / generator.repair_timer
+                generator.progress = min(1.0, repair_progress)
+                # Check if repair is complete
+                if repair_progress >= 1.0:
+                    self.interaction_start_time = None
+                    self.generator_completed()  # Call function for completion logic
 
     def generator_completed(self):
         # Update survivor logic after completing a generator
@@ -165,74 +180,106 @@ class Survivor(Entity):
                 return generator
         return None  # If no unseen generators in range
 
+    def find_generator_to_repair(self):
+        closest_generator = None
+        closest_distance = float('inf')
+
+        # Check each generator in the game
+        for generator in self.game.entities:
+            # Check if the generator is within vision range and not explored yet
+            if isinstance(generator, Generator) and self.check_vision(generator.position) and generator not in self.explored:
+                # Calculate distance to the generator
+                distance = self.find_distance(generator.position)
+                # Update closest generator if this one is closer
+                if distance < closest_distance:
+                    closest_generator = generator
+                    closest_distance = distance
+
+        return closest_generator
+
     def update(self):
         # Keep the survivor within the bounds of the screen
         self.position[0] = max(0, min(self.position[0], self.game.width))
         self.position[1] = max(0, min(self.position[1], self.game.height - 100))
 
-        # Check for injured/downed survivors within vision range
-        for other_survivor in self.game.survivors:
-            if other_survivor is not self and self.check_vision(other_survivor.position):
-                if other_survivor.state == "injured" and self.state == "healthy":
-                    self.interact(other_survivor)  # Heal the injured survivor
-                    break  # Stop after interacting with the first injured survivor in sight
-                elif other_survivor.state == "downed" and self.state == "healthy":
-                    self.interact(other_survivor)  # Revive the downed survivor
-                    break  # Stop after interacting with the first downed survivor in sight
+        # Search for generators
+        generator_to_repair = self.find_generator_to_repair()
 
-        # Check for killer within vision range
-        if self.game.killer:
-            if self.check_vision(self.game.killer.position):
-                # Move away from the killer if generator is not fully repaired
-                self.move_away_from_killer(self.game.killer.position)
-
-        # Check for unseen generators within vision range
-        for generator in self.game.entities:
-            if isinstance(generator, Generator) and not generator.is_completed:
-                closest_generator = self.find_closest_seen_generator()
-
-                # Move towards generator until in interaction range
-                if closest_generator and self.find_distance(closest_generator.position) > self.interaction_range:
-                    self.move_towards(closest_generator.position)
-                    print(f"{self.name} moving toward generator {closest_generator}!")
-                # If in range, interact with the generator
-                else:
-                    self.interaction_target = closest_generator
-                    self.interact(closest_generator)
-                    break  # Stop after interacting with the first generator in range
-
-
-        # Check previously explored generators (if no unseen found)
-        for generator in self.explored:
-            if isinstance(generator, Generator) and not generator.is_completed:
-                if self.find_distance(generator.position) <= self.interaction_range:
-                    self.interaction_target = generator  # Set generator as interaction target
-                    break  # Stop after interacting with the first generator in range
-
-        # Update repair progress for the generator being interacted with
-        if self.interaction_target and isinstance(self.interaction_target, Generator):
-            # Check how many survivors are interacting with this generator
-            interacting_survivors = 0
-            for survivor in self.game.survivors:
-                if survivor.interaction_target == self.interaction_target:
-                    interacting_survivors += 1
-
-            # Update repair timer based on the number of interacting survivors
-            repair_time_per_survivor = self.interaction_target.repair_timer / interacting_survivors
-            self.interaction_target.repair_timer -= repair_time_per_survivor
-
-            # Check if repair is complete
-            if self.interaction_target.repair_timer <= 0:
-                self.interaction_target.is_completed = True  # Mark generator as repaired
-                for survivor in self.game.survivors:  # Clear interaction target for all survivors
-                    if survivor.interaction_target == self.interaction_target:
-                        survivor.interaction_target = None
-
-        # If no interactions or danger detected, wander around
-        if self.interaction_target is None:
-            self.wander()
+        if generator_to_repair:
+            # Move towards the generator to repair it
+            self.move_towards(generator_to_repair.position)
+            # Check if the survivor is within interaction range of the generator and start repairing it
+            self.repair_generator(generator_to_repair)
         else:
-            self.stop()
+            # If no generator to repair found, wander around
+
+            # Check for killer within vision range
+            if self.game.killer:
+                if self.check_vision(self.game.killer.position):
+                    # Move away from the killer if generator is not fully repaired
+                    self.move_away_from_killer(self.game.killer.position)
+                else:
+                    self.wander()
+            else:
+                self.wander()
+
+        # # Check for injured/downed survivors within vision range
+        # for other_survivor in self.game.survivors:
+        #     if other_survivor is not self and self.check_vision(other_survivor.position):
+        #         if other_survivor.state == "injured" and self.state == "healthy":
+        #             self.interact(other_survivor)  # Heal the injured survivor
+        #             break  # Stop after interacting with the first injured survivor in sight
+        #         elif other_survivor.state == "downed" and self.state == "healthy":
+        #             self.interact(other_survivor)  # Revive the downed survivor
+        #             break  # Stop after interacting with the first downed survivor in sight
+
+        # # Check for unseen generators within vision range
+        # for generator in self.game.entities:
+        #     if isinstance(generator, Generator) and not generator.is_completed:
+        #         closest_generator = self.find_closest_seen_generator()
+        #
+        #         # Move towards generator until in interaction range
+        #         if closest_generator and self.find_distance(closest_generator.position) > self.interaction_range:
+        #             self.move_towards(closest_generator.position)
+        #             print(f"{self.name} moving toward generator {closest_generator}!")
+        #         # If in range, interact with the generator
+        #         else:
+        #             self.interaction_target = closest_generator
+        #             self.interact(closest_generator)
+        #             break  # Stop after interacting with the first generator in range
+
+
+        # # Check previously explored generators (if no unseen found)
+        # for generator in self.explored:
+        #     if isinstance(generator, Generator) and not generator.is_completed:
+        #         if self.find_distance(generator.position) <= self.interaction_range:
+        #             self.interaction_target = generator  # Set generator as interaction target
+        #             break  # Stop after interacting with the first generator in range
+        #
+        # # Update repair progress for the generator being interacted with
+        # if self.interaction_target and isinstance(self.interaction_target, Generator):
+        #     # Check how many survivors are interacting with this generator
+        #     interacting_survivors = 0
+        #     for survivor in self.game.survivors:
+        #         if survivor.interaction_target == self.interaction_target:
+        #             interacting_survivors += 1
+        #
+        #     # Update repair timer based on the number of interacting survivors
+        #     repair_time_per_survivor = self.interaction_target.repair_timer / interacting_survivors
+        #     self.interaction_target.repair_timer -= repair_time_per_survivor
+        #
+        #     # Check if repair is complete
+        #     if self.interaction_target.repair_timer <= 0:
+        #         self.interaction_target.is_completed = True  # Mark generator as repaired
+        #         for survivor in self.game.survivors:  # Clear interaction target for all survivors
+        #             if survivor.interaction_target == self.interaction_target:
+        #                 survivor.interaction_target = None
+        #
+        # # If no interactions or danger detected, wander around
+        # if self.interaction_target is None:
+        #     self.wander()
+        # else:
+        #     self.stop()
 
     def move_away_from_killer(self, killer_position):
         dx = self.position[0] - killer_position[0]

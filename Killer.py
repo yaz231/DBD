@@ -113,7 +113,8 @@ class Killer(Entity):
                 if random.random() > 0.75:
                     self.wander()
                 else:
-                    self.patrol_around_generator()
+                    if self.generator_positions:
+                        self.patrol_around_generator()
 
         # Update reward based on actions (replace with your reward logic)
         if self.is_chasing:

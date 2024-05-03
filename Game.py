@@ -97,32 +97,35 @@ class Game:
                     visible_entities.append(entity)
         return visible_entities
 
-    def initialize_game(self):
-        for i in range(4):
+    def initialize_game(self, survivors=True, killer=True, generators=True):
+        if survivors:
+            for i in range(4):
+                pos = self.generate_random_position()
+                while self.is_collision(pos):
+                    pos = self.generate_random_position()
+                survivor = Survivor(f"Survivor {i + 1}", pos, self)
+                self.add_entity(survivor)
+
+        if generators:
+            for i in range(6):
+                pos = self.generate_random_position()
+                while self.is_collision(pos):
+                    pos = self.generate_random_position()
+
+                generator = Generator(pos)
+                self.add_entity(generator)
+                self.generator_list.append(generator)
+                self.generator_pos.append(pos)
+
+        if killer:
             pos = self.generate_random_position()
             while self.is_collision(pos):
                 pos = self.generate_random_position()
-            survivor = Survivor(f"Survivor {i + 1}", pos, self)
-            self.add_entity(survivor)
+            self.killer = Killer("Jason", pos, self, self.generator_pos)  # Pass the Game instance to the Killer constructor
+            self.add_entity(self.killer)
 
-        for i in range(6):
-            pos = self.generate_random_position()
-            while self.is_collision(pos):
-                pos = self.generate_random_position()
-
-            generator = Generator(pos)
-            self.add_entity(generator)
-            self.generator_list.append(generator)
-            self.generator_pos.append(pos)
-
-        pos = self.generate_random_position()
-        while self.is_collision(pos):
-            pos = self.generate_random_position()
-        self.killer = Killer("Jason", pos, self, self.generator_pos)  # Pass the Game instance to the Killer constructor
-        self.add_entity(self.killer)
-
-    def run(self):
-        self.initialize_game()
+    def run(self, survivors, killer, generators):
+        self.initialize_game(survivors, killer, generators)
         clock = pygame.time.Clock()
         running = True
         while running:
@@ -139,4 +142,4 @@ class Game:
 
 if __name__ == "__main__":
     game = Game(1300, 1000)
-    game.run()
+    game.run(True, True, False)
